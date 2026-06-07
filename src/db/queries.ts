@@ -682,6 +682,22 @@ export class QueryBuilder {
   }
 
   /**
+   * Stream every node of a kind one at a time (lazy) instead of materializing
+   * them all like {@link getNodesByKind}. For unbounded kinds (`function`,
+   * `method`) on a symbol-dense project the full array is gigabytes; the
+   * dynamic-edge synthesizers only scan-and-filter, so they iterate to keep
+   * memory O(1) in the node count rather than O(nodes) (#610).
+   */
+  *iterateNodesByKind(kind: NodeKind): IterableIterator<Node> {
+    // Fresh statement per call (not a cached one): an iterator holds an open
+    // cursor, so a shared statement would conflict across overlapping scans.
+    const stmt = this.db.prepare('SELECT * FROM nodes WHERE kind = ?');
+    for (const row of stmt.iterate(kind)) {
+      yield rowToNode(row as NodeRow);
+    }
+  }
+
+  /**
    * Get all nodes in the database
    */
   getAllNodes(): Node[] {
@@ -1335,6 +1351,52 @@ export class QueryBuilder {
     return rows.map(rowToEdge);
   }
 
+  /**
+   * Distinct file paths that DEPEND ON `filePath`: every file containing a
+   * symbol with a cross-file edge (any kind except `contains`) into a symbol
+   * of this file. This is the file-level projection of the symbol dependency
+   * graph and the basis for blast-radius / `affected` test selection.
+   *
+   * It deliberately does NOT restrict to `imports` edges. In this graph an
+   * `imports` edge connects a file to its own local import declarations
+   * (it is always same-file), so an imports-only lookup returns zero
+   * cross-file dependents for every file. The real cross-file dependency
+   * signal is the resolved call/reference graph — calls, references,
+   * instantiates, extends, implements, overrides, type_of, returns,
+   * decorates — exactly what {@link GraphTraverser.getImpactRadius} traverses.
+   * `contains` is excluded: a parent containing a symbol does not *depend* on
+   * it. One indexed query (idx_nodes_file_path + idx_edges_target_kind).
+   */
+  getDependentFilePaths(filePath: string): string[] {
+    const sql = `SELECT DISTINCT src.file_path AS fp
+      FROM edges e
+      JOIN nodes tgt ON tgt.id = e.target
+      JOIN nodes src ON src.id = e.source
+      WHERE tgt.file_path = ?
+        AND e.kind != 'contains'
+        AND src.file_path != ?`;
+    const rows = this.db.prepare(sql).all(filePath, filePath) as Array<{ fp: string }>;
+    return rows.map((r) => r.fp);
+  }
+
+  /**
+   * Distinct file paths that `filePath` DEPENDS ON — the inverse of
+   * {@link getDependentFilePaths}: every file containing a symbol that a
+   * symbol of this file has a cross-file edge into. Same edge-kind rules
+   * (all kinds except `contains`); same reason imports-only is insufficient.
+   */
+  getDependencyFilePaths(filePath: string): string[] {
+    const sql = `SELECT DISTINCT tgt.file_path AS fp
+      FROM edges e
+      JOIN nodes src ON src.id = e.source
+      JOIN nodes tgt ON tgt.id = e.target
+      WHERE src.file_path = ?
+        AND e.kind != 'contains'
+        AND tgt.file_path != ?`;
+    const rows = this.db.prepare(sql).all(filePath, filePath) as Array<{ fp: string }>;
+    return rows.map((r) => r.fp);
+  }
+
   // ===========================================================================
   // File Operations
   // ===========================================================================
@@ -1403,6 +1465,17 @@ export class QueryBuilder {
     }
     const rows = this.stmts.getAllFiles.all() as FileRow[];
     return rows.map(rowToFileRecord);
+  }
+
+  /**
+   * Most recent index timestamp (ms since epoch) across all tracked files, or
+   * null when nothing is indexed yet. One indexed aggregate, no per-row scan. (#329)
+   */
+  getLastIndexedAt(): number | null {
+    const row = this.db
+      .prepare('SELECT MAX(indexed_at) AS last FROM files')
+      .get() as { last: number | null } | undefined;
+    return row?.last ?? null;
   }
 
   /**
@@ -1572,10 +1645,19 @@ export class QueryBuilder {
   getUnresolvedReferencesByFiles(filePaths: string[]): UnresolvedReference[] {
     if (filePaths.length === 0) return [];
 
-    const placeholders = filePaths.map(() => '?').join(',');
-    const rows = this.db
-      .prepare(`SELECT * FROM unresolved_refs WHERE file_path IN (${placeholders})`)
-      .all(...filePaths) as UnresolvedRefRow[];
+    // Chunk under SQLite's parameter limit: the first sync of a very large repo
+    // passes every changed file here, which an unbounded `IN (...)` would bind
+    // as one parameter each — exceeding MAX_VARIABLE_NUMBER and aborting with
+    // "too many SQL variables". (#540)
+    const rows: UnresolvedRefRow[] = [];
+    for (let i = 0; i < filePaths.length; i += SQLITE_PARAM_CHUNK_SIZE) {
+      const chunk = filePaths.slice(i, i + SQLITE_PARAM_CHUNK_SIZE);
+      const placeholders = chunk.map(() => '?').join(',');
+      const chunkRows = this.db
+        .prepare(`SELECT * FROM unresolved_refs WHERE file_path IN (${placeholders})`)
+        .all(...chunk) as UnresolvedRefRow[];
+      rows.push(...chunkRows);
+    }
 
     return rows.map((row) => ({
       fromNodeId: row.from_node_id,

@@ -47,10 +47,17 @@ import { GraphTraverser, GraphQueryManager } from './graph';
 import { ContextBuilder, createContextBuilder } from './context';
 import { Mutex, FileLock } from './utils';
 import { FileWatcher, WatchOptions, PendingFile, LockUnavailableError } from './sync';
+import { EXTRACTION_VERSION } from './extraction/extraction-version';
+import { CodeGraphPackageVersion } from './mcp/version';
 
 // Re-export types for consumers
 export * from './types';
-export { getDatabasePath } from './db';
+// Storage building blocks for embedded/SDK consumers that drive the graph
+// directly (open a DB, run prepared queries) rather than through the CodeGraph
+// facade. Exposed from the package entry so they no longer require deep imports
+// into dist/ (issue #354).
+export { getDatabasePath, DatabaseConnection } from './db';
+export { QueryBuilder } from './db/queries';
 export {
   getCodeGraphDir,
   isInitialized,
@@ -377,6 +384,18 @@ export class CodeGraph {
           result.edgesCreated = after.edges - before.edges;
         }
 
+        // Stamp the index with the engine that built it, so `codegraph status`
+        // and `codegraph upgrade` can recommend a re-index when the running
+        // engine produces richer extraction than the one on disk. Only on a
+        // real full index — a sync touches a subset, so it must NOT advance the
+        // extraction stamp (the bulk would still be stale). See extraction-version.ts.
+        if (result.success && result.filesIndexed > 0) {
+          try {
+            this.queries.setMetadata('indexed_with_version', CodeGraphPackageVersion);
+            this.queries.setMetadata('indexed_with_extraction_version', String(EXTRACTION_VERSION));
+          } catch { /* metadata is advisory — never fail an index over it */ }
+        }
+
         return result;
       } finally {
         this.fileLock.release();
@@ -556,8 +575,8 @@ export class CodeGraph {
   }
 
   /**
-   * Resolves once the file watcher has finished its initial chokidar scan.
-   * Useful for tests that need a deterministic boundary before asserting on
+   * Resolves once the file watcher has installed its watch set. Useful for
+   * tests that need a deterministic boundary before asserting on
    * `getPendingFiles()`. Resolves immediately when no watcher is active.
    */
   waitUntilWatcherReady(timeoutMs?: number): Promise<void> {
@@ -569,6 +588,41 @@ export class CodeGraph {
    */
   getChangedFiles(): { added: string[]; modified: string[]; removed: string[] } {
     return this.orchestrator.getChangedFiles();
+  }
+
+  /**
+   * Most recent index timestamp (ms since epoch) across all tracked files, or
+   * null when nothing is indexed yet. Lets library consumers check index
+   * freshness without shelling out to `codegraph status --json`. (#329)
+   */
+  getLastIndexedAt(): number | null {
+    return this.queries.getLastIndexedAt();
+  }
+
+  /**
+   * Which engine built the current index: the package version + extraction
+   * version stamped at the last full `indexAll`. Either field is null for an
+   * index built before stamping existed (treated as stale). See
+   * `extraction-version.ts` and `isIndexStale()`.
+   */
+  getIndexBuildInfo(): { version: string | null; extractionVersion: number | null } {
+    const version = this.queries.getMetadata('indexed_with_version');
+    const ev = this.queries.getMetadata('indexed_with_extraction_version');
+    const parsed = ev != null ? parseInt(ev, 10) : NaN;
+    return { version, extractionVersion: Number.isFinite(parsed) ? parsed : null };
+  }
+
+  /**
+   * True when the on-disk index was built by an engine whose extraction is
+   * older than the one now running — i.e. a re-index would add data a migration
+   * can't backfill. False when there's no index yet (nothing to refresh) or the
+   * stamp is current. This is the signal behind `codegraph status`'s re-index
+   * hint and `codegraph upgrade`'s reminder.
+   */
+  isIndexStale(): boolean {
+    if (this.queries.getLastIndexedAt() == null) return false;
+    const { extractionVersion } = this.getIndexBuildInfo();
+    return extractionVersion == null || extractionVersion < EXTRACTION_VERSION;
   }
 
   /**
@@ -677,6 +731,15 @@ export class CodeGraph {
   }
 
   /**
+   * Get ALL nodes with an exact name (direct index lookup, not FTS-ranked/capped).
+   * Used to enumerate every overload of a heavily-overloaded name so the specific
+   * definition the caller wants is never dropped below a search cut.
+   */
+  getNodesByName(name: string): Node[] {
+    return this.queries.getNodesByName(name);
+  }
+
+  /**
    * Search nodes by text
    */
   searchNodes(query: string, options?: SearchOptions): SearchResult[] {
@@ -687,7 +750,7 @@ export class CodeGraph {
    * Find the project's "primary route file" — the file with the densest
    * concentration of framework-emitted `route` nodes (≥3 routes, ≥30%
    * of all non-test routes). Used to inline the routing config in
-   * `codegraph_context` responses on small realworld template repos
+   * `codegraph_explore` responses on small realworld template repos
    * (rails-realworld, laravel-realworld, drupal-admintoolbar, …) where
    * Glob+Read of `routes.rb`/`urls.py`/etc. otherwise beats codegraph.
    */

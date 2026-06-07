@@ -853,6 +853,114 @@ func UseAliased() {
       expect(target?.filePath.replace(/\\/g, '/')).toBe('pkgb/lib.go');
     });
 
+    it('resolves Python module-attribute calls after `from pkg import module` (#578)', async () => {
+      // Pre-#578, a `module.func()` call where `module` was bound via
+      // `from pkg import module` dropped its `calls` edge. The file→file import
+      // edge resolved (resolveModuleImportToFile falls back to a dotted-module
+      // file lookup for absolute package paths), but resolvePythonModuleMember
+      // had no such fallback — resolveImportPath returns null for an absolute
+      // package path like `pkg.module`, so the member never resolved and
+      // callers/callees/impact on the target came back empty. Same root-cause
+      // class as the Go cross-package qualified call (#388).
+      fs.mkdirSync(path.join(tempDir, 'pkg'));
+      fs.writeFileSync(path.join(tempDir, 'pkg', '__init__.py'), '');
+      fs.writeFileSync(
+        path.join(tempDir, 'pkg', 'module.py'),
+        'def func():\n    return 1\n'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'main.py'),
+        `from pkg import module
+import os
+
+
+def caller():
+    return module.func()
+
+
+def external_caller():
+    return os.getcwd()
+`
+      );
+
+      cg = await CodeGraph.init(tempDir, { index: true });
+
+      const caller = cg.getNodesByKind('function').filter((n) => n.name === 'caller')[0];
+      expect(caller).toBeDefined();
+      const calls = cg.getOutgoingEdges(caller!.id).filter((e) => e.kind === 'calls');
+      // module.func() must resolve to the real function in the submodule file.
+      expect(calls).toHaveLength(1);
+      const target = cg.getNode(calls[0]!.target);
+      expect(target?.name).toBe('func');
+      expect(target?.filePath.replace(/\\/g, '/')).toBe('pkg/module.py');
+
+      // The flip side of the fix: an attribute call through a *stdlib* module
+      // (`os.getcwd()`) must still create no edge — the fallback only matches
+      // real in-repo module files.
+      const externalCaller = cg.getNodesByKind('function').filter((n) => n.name === 'external_caller')[0];
+      expect(externalCaller).toBeDefined();
+      const externalCalls = cg.getOutgoingEdges(externalCaller!.id).filter((e) => e.kind === 'calls');
+      expect(externalCalls).toHaveLength(0);
+    });
+
+    it('attaches Go methods to their receiver type across files (#583, cross-file half)', async () => {
+      // In Go a type's methods are commonly declared in a different file from the
+      // `type` declaration (`type Box` in box.go, `func (b *Box) Get()` in
+      // box_methods.go). Extraction only attaches the struct→method `contains`
+      // edge when the type is in the SAME file (the owner lookup is file-scoped),
+      // so a cross-file method was orphaned from its struct — breaking member
+      // outlines and any callers/callees/impact traversal through `contains`. A
+      // resolution-phase pass now links them within the package (= directory).
+      fs.writeFileSync(
+        path.join(tempDir, 'box.go'),
+        'package main\n\ntype Box struct{ v int }\n'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'box_methods.go'),
+        'package main\n\nfunc (b *Box) Get() int { return b.v }\nfunc (b *Box) Set(x int) { b.v = x }\n'
+      );
+      // Generic receiver declared cross-file too — exercises #583 half A
+      // (generic `*Stack[T]` receiver parsing) and half B (cross-file) together.
+      fs.writeFileSync(
+        path.join(tempDir, 'stack.go'),
+        'package main\n\ntype Stack[T any] struct {\n\titems []T\n}\n'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'stack_push.go'),
+        'package main\n\nfunc (s *Stack[T]) Push(v T) { s.items = append(s.items, v) }\n'
+      );
+      // A same-named type in another package must NOT capture this package's
+      // methods — the link is scoped to the receiver type's own directory.
+      fs.mkdirSync(path.join(tempDir, 'other'));
+      fs.writeFileSync(
+        path.join(tempDir, 'other', 'box.go'),
+        'package other\n\ntype Box struct{ w int }\n'
+      );
+
+      cg = await CodeGraph.init(tempDir, { index: true });
+
+      const methodsOf = (typeName: string, file: string): string[] => {
+        const node = cg
+          .getNodesByKind('struct')
+          .find((n) => n.name === typeName && n.filePath.replace(/\\/g, '/') === file);
+        expect(node, `${typeName} @ ${file}`).toBeDefined();
+        return cg
+          .getOutgoingEdges(node!.id)
+          .filter((e) => e.kind === 'contains')
+          .map((e) => cg.getNode(e.target))
+          .filter((n) => !!n && n.kind === 'method')
+          .map((n) => n!.name)
+          .sort();
+      };
+
+      // Cross-file (non-generic) methods now attach to their struct.
+      expect(methodsOf('Box', 'box.go')).toEqual(['Get', 'Set']);
+      // Generic + cross-file.
+      expect(methodsOf('Stack', 'stack.go')).toEqual(['Push']);
+      // Cross-package isolation: other/Box defines no methods of its own.
+      expect(methodsOf('Box', 'other/box.go')).toEqual([]);
+    });
+
     it('TS type_alias object-shape members resolve method calls (#359)', async () => {
       // Pre-#359, `recorder.stop()` (recorder: RecorderHandle) attached
       // to `StdioMcpClient.stop` in a sibling directory via path-proximity
@@ -1247,6 +1355,178 @@ func main() {
       expect(signInNode).toBeDefined();
       const callers = cg.getCallers(signInNode!.id);
       expect(callers.some((c) => c.node.filePath === 'src/main.ts')).toBe(true);
+    });
+
+    it('follows a default re-export of a .svelte component (export { default as Foo } from ./RealButton.svelte) (#629)', async () => {
+      // The ubiquitous Svelte/React component-barrel form. The leaf is a
+      // .svelte component (extracted as kind 'component', the default
+      // export). The re-export ALIAS (`Foo`) deliberately differs from the
+      // component's real name (`RealButton`) so the name-matcher fallback
+      // can't coincidentally connect them — the only path to the edge is
+      // the import-chase, which must match a `component` (not just
+      // function/class) for the default export. Otherwise the
+      // consumer↔component edge is never created and `callers` returns a
+      // false 0.
+      fs.mkdirSync(path.join(tempDir, 'src/lib'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src/lib/RealButton.svelte'),
+        `<script lang="ts">\n  export let label: string = '';\n</script>\n\n<button>{label}</button>\n`
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src/lib/index.ts'),
+        `export { default as Foo } from './RealButton.svelte';\n`
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src/Bar.svelte'),
+        `<script lang="ts">\n  import { Foo } from './lib';\n</script>\n\n<Foo />\n`
+      );
+
+      cg = await CodeGraph.init(tempDir, { index: true });
+      cg.resolveReferences();
+
+      const fooNode = cg
+        .getNodesByKind('component')
+        .find((n) => n.name === 'RealButton' && n.filePath === 'src/lib/RealButton.svelte');
+      expect(fooNode).toBeDefined();
+      const callers = cg.getCallers(fooNode!.id);
+      expect(callers.some((c) => c.node.filePath === 'src/Bar.svelte')).toBe(true);
+    });
+
+    it('resolves a bare directory import (import { x } from "." / "./") to index.ts (#629)', async () => {
+      // `import { helper } from '.'` (or './') must map to the
+      // directory's index.ts before the re-export chase can run. The
+      // barrel renames `realHelper` → `helper` so the name-matcher can't
+      // mask a path-resolution failure: only the bare-dir resolution +
+      // rename chase can connect the edge.
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src/util.ts'),
+        `export function realHelper(): void {}\n`
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src/index.ts'),
+        `export { realHelper as helper } from './util';\n`
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src/main.ts'),
+        `import { helper } from '.';\nexport function go(): void { helper(); }\n`
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src/main2.ts'),
+        `import { helper } from './';\nexport function go2(): void { helper(); }\n`
+      );
+
+      cg = await CodeGraph.init(tempDir, { index: true });
+      cg.resolveReferences();
+
+      const helperNode = cg
+        .getNodesByKind('function')
+        .find((n) => n.name === 'realHelper' && n.filePath === 'src/util.ts');
+      expect(helperNode).toBeDefined();
+      const callers = cg.getCallers(helperNode!.id);
+      expect(callers.some((c) => c.node.filePath === 'src/main.ts')).toBe(true);
+      expect(callers.some((c) => c.node.filePath === 'src/main2.ts')).toBe(true);
+    });
+
+    it('resolves a workspace package-subpath barrel (@scope/pkg/sub) to its index (#629)', async () => {
+      // bun/npm/pnpm workspace: `@scope/ui/widgets` → the `ui` package's
+      // `widgets/` subdir index, which re-exports a .svelte component.
+      // Alias `Thing` ≠ component `Widget` defeats the name-matcher, so
+      // only workspace-package resolution can connect the edge.
+      fs.mkdirSync(path.join(tempDir, 'packages/ui/widgets'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'package.json'),
+        JSON.stringify({ name: 'root', private: true, workspaces: ['packages/*'] }, null, 2)
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'packages/ui/package.json'),
+        JSON.stringify({ name: '@scope/ui', version: '1.0.0' }, null, 2)
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'packages/ui/widgets/Widget.svelte'),
+        `<script lang="ts">\n  export let label: string = '';\n</script>\n\n<button>{label}</button>\n`
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'packages/ui/widgets/index.ts'),
+        `export { default as Thing } from './Widget.svelte';\n`
+      );
+      fs.mkdirSync(path.join(tempDir, 'app'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'app/App.svelte'),
+        `<script lang="ts">\n  import { Thing } from '@scope/ui/widgets';\n</script>\n\n<Thing />\n`
+      );
+
+      cg = await CodeGraph.init(tempDir, { index: true });
+      cg.resolveReferences();
+
+      const buttonNode = cg
+        .getNodesByKind('component')
+        .find((n) => n.name === 'Widget' && n.filePath === 'packages/ui/widgets/Widget.svelte');
+      expect(buttonNode).toBeDefined();
+      const callers = cg.getCallers(buttonNode!.id);
+      expect(callers.some((c) => c.node.filePath === 'app/App.svelte')).toBe(true);
+    });
+
+    it('resolves a barrel import from a Vue SFC <script> block (#629)', async () => {
+      // The same import-resolution gaps (no SFC import mappings, no SFC
+      // extension list, barrel parsed in the consumer's language) broke
+      // Vue SFCs too. Guards the resolver-side generalization to `.vue`.
+      // The barrel renames `realRun` → `run` so only the import-chase (not
+      // the name-matcher) can connect the call.
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src/util.ts'),
+        `export function realRun(): void {}\n`
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src/index.ts'),
+        `export { realRun as run } from './util';\n`
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src/App.vue'),
+        `<script lang="ts">\nimport { run } from './';\nexport default { mounted() { run(); } };\n</script>\n<template><div/></template>\n`
+      );
+
+      cg = await CodeGraph.init(tempDir, { index: true });
+      cg.resolveReferences();
+
+      const runNode = cg
+        .getNodesByKind('function')
+        .find((n) => n.name === 'realRun' && n.filePath === 'src/util.ts');
+      expect(runNode).toBeDefined();
+      const callers = cg.getCallers(runNode!.id);
+      expect(callers.some((c) => c.node.filePath === 'src/App.vue')).toBe(true);
+    });
+
+    it('follows a Vue component used in a <template> through a default re-export barrel (#629)', async () => {
+      // End-to-end Vue analogue of the Svelte case: the leaf is a `.vue`
+      // component re-exported under an alias (`Thing`) that differs from its
+      // real name (`Widget`), and the consumer uses it ONLY in markup
+      // (`<Thing />`). Requires both the new template-tag extraction AND the
+      // barrel default-export chase to connect the edge.
+      fs.mkdirSync(path.join(tempDir, 'src/lib'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src/lib/Widget.vue'),
+        `<script setup lang="ts">\ndefineProps<{ label?: string }>();\n</script>\n<template><button>x</button></template>\n`
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src/lib/index.ts'),
+        `export { default as Thing } from './Widget.vue';\n`
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src/App.vue'),
+        `<script setup lang="ts">\nimport { Thing } from './lib';\n</script>\n<template>\n  <Thing />\n</template>\n`
+      );
+
+      cg = await CodeGraph.init(tempDir, { index: true });
+      cg.resolveReferences();
+
+      const widgetNode = cg
+        .getNodesByKind('component')
+        .find((n) => n.name === 'Widget' && n.filePath === 'src/lib/Widget.vue');
+      expect(widgetNode).toBeDefined();
+      const callers = cg.getCallers(widgetNode!.id);
+      expect(callers.some((c) => c.node.filePath === 'src/App.vue')).toBe(true);
     });
   });
 

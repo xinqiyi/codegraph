@@ -4,7 +4,7 @@
 
 ### Supercharge Claude Code, Cursor, Codex, OpenCode, Hermes Agent, Gemini, Antigravity, and Kiro with Semantic Code Intelligence
 
-**~22% cheaper · ~50% fewer tool calls · 100% local**
+**~16% cheaper · ~58% fewer tool calls · 100% local**
 
 ### [Documentation & Website →](https://colbymchenry.github.io/codegraph/)
 
@@ -25,9 +25,19 @@
 [![Antigravity](https://img.shields.io/badge/Antigravity-supported-blueviolet.svg)](#supported-agents)
 [![Kiro](https://img.shields.io/badge/Kiro-supported-blueviolet.svg)](#supported-agents)
 
+<br>
+
+**The CodeGraph platform is coming** — for every PR, know exactly what to test, what could break, which flows are affected, and whether business logic is compromised.
+
+<a href="https://getcodegraph.com"><img alt="Join the waitlist for early beta access" src="https://raw.githubusercontent.com/colbymchenry/codegraph/main/assets/waitlist.svg?v=2" height="52"></a>
+
+<sub>Get <b>early beta access</b> to the hosted product · <a href="https://getcodegraph.com">getcodegraph.com</a></sub>
+
 </div>
 
 ## Get Started
+
+### 1. Install the CLI
 
 **No Node.js required** — one command grabs the right build for your OS:
 
@@ -42,13 +52,24 @@ irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | 
 Already have Node? Use npm instead (works on any version):
 
 ```bash
-npx @colbymchenry/codegraph        # zero-install, or:
 npm i -g @colbymchenry/codegraph
 ```
 
-<sub>CodeGraph bundles its own runtime — nothing to compile, no native build, works the same everywhere. The interactive installer auto-configures your agent(s) — Claude Code, Cursor, Codex CLI, opencode, Hermes Agent, Gemini CLI, Antigravity IDE, Kiro.</sub>
+<sub>CodeGraph bundles its own runtime — nothing to compile, no native build, works the same everywhere. The installer puts `codegraph` on your PATH but **doesn't change your current shell** — open a new terminal before the next step so the command resolves.</sub>
 
-### Initialize Projects
+<sub>**Upgrade any time** with `codegraph upgrade` — it detects how you installed (bundle, npm, or npx) and updates in place. Add `--check` to see if an update is available, or `codegraph upgrade <version>` to pin one.</sub>
+
+### 2. Wire up your agent(s)
+
+In a **new terminal**, run the installer to connect CodeGraph to the agents you use:
+
+```bash
+codegraph install
+```
+
+<sub>Detects and auto-configures Claude Code, Cursor, Codex CLI, opencode, Hermes Agent, Gemini CLI, Antigravity IDE, and Kiro — wiring the CodeGraph MCP server into each. **This is the step that connects CodeGraph to your agent;** installing the CLI in step 1 does not do it on its own. (Shortcut: `npx @colbymchenry/codegraph` downloads and runs this in one go.)</sub>
+
+### 3. Initialize each project
 
 ```bash
 cd your-project
@@ -83,21 +104,21 @@ When Claude Code explores a codebase, it spawns **Explore agents** that scan fil
 
 ### Benchmark Results
 
-Tested across **7 real-world open-source codebases** spanning 7 languages, comparing an agent (Claude Code, headless) answering one architecture question **with** and **without** CodeGraph. Each cell is the savings at the **median of 4 runs per arm**. _Re-validated on Opus 4.8 (2026-05-29), on the build with adaptive `codegraph_explore` sizing._
+Tested across **7 real-world open-source codebases** spanning 7 languages, comparing an agent (Claude Code, headless) answering one architecture question **with** and **without** CodeGraph. Each cell is the savings at the **median of 4 runs per arm**. _Re-validated on Opus 4.8 (2026-06-02), on the current build (`codegraph_explore` as the primary tool)._
 
-> **Average: 22% cheaper · 47% fewer tokens · 20% faster · 50% fewer tool calls**
+> **Average: 16% cheaper · 47% fewer tokens · 22% faster · 58% fewer tool calls**
 
 | Codebase | Language | Cost | Tokens | Time | Tool calls |
 |----------|----------|------|--------|------|------------|
-| **VS Code** | TypeScript · ~10k files | 13% cheaper | 63% fewer | 11% faster | 82% fewer |
-| **Excalidraw** | TypeScript · ~640 | 40% cheaper | 71% fewer | 51% faster | 82% fewer |
-| **Django** | Python · ~3k | 9% cheaper | 35% fewer | 7% faster | 38% fewer |
-| **Tokio** | Rust · ~790 | 31% cheaper | 59% fewer | 29% faster | 61% fewer |
-| **OkHttp** | Java · ~645 | 4% cheaper | 16% fewer | 11% faster | 40% fewer |
-| **Gin** | Go · ~110 | 28% cheaper | 40% fewer | 25% faster | 35% fewer |
-| **Alamofire** | Swift · ~110 | 32% cheaper | 43% fewer | 6% faster | 13% fewer |
+| **VS Code** | TypeScript · ~10k files | 18% cheaper | 64% fewer | 11% faster | 81% fewer |
+| **Excalidraw** | TypeScript · ~640 | even | 25% fewer | 27% faster | 40% fewer |
+| **Django** | Python · ~3k | 8% cheaper | 60% fewer | 13% faster | 77% fewer |
+| **Tokio** | Rust · ~790 | even | 38% fewer | 18% faster | 57% fewer |
+| **OkHttp** | Java · ~645 | 25% cheaper | 54% fewer | 31% faster | 50% fewer |
+| **Gin** | Go · ~110 | 19% cheaper | 23% fewer | 24% faster | 44% fewer |
+| **Alamofire** | Swift · ~110 | 40% cheaper | 64% fewer | 33% faster | 58% fewer |
 
-CodeGraph cuts **tool calls and total tokens on every repo** and answers large repos with **zero file reads**, while the no-CodeGraph agent spends its budget on grep/find/Read discovery. **Every repo is now cheaper, not just faster** — the two former cost outliers (Django and OkHttp, where the answer spans many interchangeable implementations of one interface) flipped from *costlier* than native search to cheaper once adaptive `codegraph_explore` sizing stopped shipping every sibling's full body. The margin is still narrowest on the smallest repos, where a modern model's native search is already cheap, but it stays positive across the board; the largest wins remain fewer tool calls and faster answers.
+CodeGraph cuts **tokens, tool calls, and wall-clock time on every repo** — across small, medium, and large codebases — and answers them with **near-zero file reads**, while the no-CodeGraph agent spends its budget on grep/find/Read discovery. `codegraph_explore` shows the answer in full — the mechanism plus the exact methods you asked about, even when they're buried in a multi-thousand-line file — while collapsing redundant interchangeable implementations to signatures, so the response is sized to the *answer* rather than the file count. **Cost stays flat-to-cheaper everywhere** — largest on the small repos (Alamofire, OkHttp), roughly break-even on the most response-heavy ones (Excalidraw, Tokio), where CodeGraph trades the no-CodeGraph agent's many small grep/read round-trips for a few large, cache-heavy tool responses.
 
 <details>
 <summary><strong>Per-repo breakdown — WITH vs WITHOUT (median of 4)</strong></summary>
@@ -105,79 +126,79 @@ CodeGraph cuts **tool calls and total tokens on every repo** and answers large r
 **VS Code** · ~10k files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 1m 58s | 2m 13s | 11% faster |
-| File Reads | 0 | 8 | −8 |
-| Grep/Bash | 0 | 9 | −9 |
-| Tool calls | 3 | 17 | 82% fewer |
-| Total tokens | 607k | 1.65M | 63% fewer |
-| Cost | $0.66 | $0.76 | 13% cheaper |
+| Time | 1m 59s | 2m 13s | 11% faster |
+| File Reads | 0 | 9 | −9 |
+| Grep/Bash | 0 | 11 | −11 |
+| Tool calls | 4 | 21 | 81% fewer |
+| Total tokens | 640k | 1.79M | 64% fewer |
+| Cost | $0.68 | $0.83 | 18% cheaper |
 
 **Excalidraw** · ~640 files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 1m 23s | 2m 48s | 51% faster |
-| File Reads | 0 | 11 | −11 |
-| Grep/Bash | 0 | 9 | −9 |
-| Tool calls | 4 | 20 | 82% fewer |
-| Total tokens | 596k | 2.06M | 71% fewer |
-| Cost | $0.53 | $0.89 | 40% cheaper |
+| Time | 1m 32s | 2m 6s | 27% faster |
+| File Reads | 0 | 7 | −7 |
+| Grep/Bash | 1 | 8 | −7 |
+| Tool calls | 9 | 15 | 40% fewer |
+| Total tokens | 1.27M | 1.69M | 25% fewer |
+| Cost | $0.78 | $0.78 | even |
 
 **Django** · ~3k files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 1m 43s | 1m 51s | 7% faster |
-| File Reads | 5 | 10 | −5 |
-| Grep/Bash | 0 | 4 | −4 |
-| Tool calls | 8 | 13 | 38% fewer |
-| Total tokens | 752k | 1.16M | 35% fewer |
-| Cost | $0.56 | $0.62 | 9% cheaper |
+| Time | 1m 43s | 1m 58s | 13% faster |
+| File Reads | 0 | 9 | −9 |
+| Grep/Bash | 0 | 5 | −5 |
+| Tool calls | 3 | 13 | 77% fewer |
+| Total tokens | 559k | 1.41M | 60% fewer |
+| Cost | $0.57 | $0.62 | 8% cheaper |
 
 **Tokio** · ~790 files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 2m 3s | 2m 53s | 29% faster |
-| File Reads | 3 | 9 | −6 |
-| Grep/Bash | 0 | 7 | −7 |
-| Tool calls | 7 | 17 | 61% fewer |
-| Total tokens | 869k | 2.14M | 59% fewer |
-| Cost | $0.63 | $0.92 | 31% cheaper |
+| Time | 1m 55s | 2m 20s | 18% faster |
+| File Reads | 0 | 8 | −8 |
+| Grep/Bash | 0 | 6 | −6 |
+| Tool calls | 6 | 14 | 57% fewer |
+| Total tokens | 1.08M | 1.73M | 38% fewer |
+| Cost | $0.82 | $0.82 | even |
 
 **OkHttp** · ~645 files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 1m 18s | 1m 27s | 11% faster |
-| File Reads | 2 | 4 | −2 |
-| Grep/Bash | 0 | 4 | −4 |
-| Tool calls | 5 | 8 | 40% fewer |
-| Total tokens | 739k | 883k | 16% fewer |
-| Cost | $0.54 | $0.56 | 4% cheaper |
+| Time | 1m 1s | 1m 29s | 31% faster |
+| File Reads | 0 | 4 | −4 |
+| Grep/Bash | 2 | 6 | −4 |
+| Tool calls | 5 | 10 | 50% fewer |
+| Total tokens | 502k | 1.10M | 54% fewer |
+| Cost | $0.41 | $0.55 | 25% cheaper |
 
 **Gin** · ~110 files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 1m 8s | 1m 30s | 25% faster |
-| File Reads | 0 | 3 | −3 |
-| Grep/Bash | 0 | 5 | −5 |
-| Tool calls | 6 | 9 | 35% fewer |
-| Total tokens | 532k | 887k | 40% fewer |
-| Cost | $0.36 | $0.50 | 28% cheaper |
+| Time | 1m 14s | 1m 37s | 24% faster |
+| File Reads | 1 | 6 | −5 |
+| Grep/Bash | 1 | 2 | −1 |
+| Tool calls | 5 | 9 | 44% fewer |
+| Total tokens | 651k | 847k | 23% fewer |
+| Cost | $0.46 | $0.57 | 19% cheaper |
 
 **Alamofire** · ~110 files
 | Metric | WITH cg | WITHOUT cg | Δ |
 |---|---|---|---|
-| Time | 2m 19s | 2m 28s | 6% faster |
-| File Reads | 5 | 9 | −4 |
-| Grep/Bash | 1 | 4 | −3 |
-| Tool calls | 11 | 12 | 13% fewer |
-| Total tokens | 1.22M | 2.14M | 43% fewer |
-| Cost | $0.71 | $1.04 | 32% cheaper |
+| Time | 1m 35s | 2m 21s | 33% faster |
+| File Reads | 0 | 9 | −9 |
+| Grep/Bash | 0 | 4 | −4 |
+| Tool calls | 5 | 12 | 58% fewer |
+| Total tokens | 766k | 2.10M | 64% fewer |
+| Cost | $0.57 | $0.95 | 40% cheaper |
 
 </details>
 
 <details>
 <summary><strong>Full benchmark details</strong></summary>
 
-**Methodology.** Each arm is `claude -p` (Claude Opus 4.8) run headlessly against the repo with `--strict-mcp-config`: **WITH** = CodeGraph's MCP server enabled, **WITHOUT** = an empty MCP config. Built-in Read/Grep/Bash stay available to both. Same question per repo, **4 runs per arm, median reported**. Cost = the run's `total_cost_usd`; Tokens = total tokens processed (input incl. cached + output); Time = wall-clock; Tool calls = every tool invocation, including those inside any sub-agents the model spawns. Repos cloned at `--depth 1` and indexed by the same CodeGraph build that served them. Re-validated 2026-05-29 on the build with adaptive `codegraph_explore` sizing. These numbers are lower than the prior Opus 4.7 validation — not a CodeGraph regression but a stronger native baseline: Opus 4.8 greps/reads efficiently on the main thread instead of fanning out into large Explore-subagent sweeps, so the no-CodeGraph arm is leaner than it used to be. Per-repo numbers move run-to-run with how hard the without-arm thrashes (the median-of-4 smooths it, but tails remain — e.g. Django's without-arm hit $2.71/14m one batch).
+**Methodology.** Each arm is `claude -p` (Claude Opus 4.8) run headlessly against the repo with `--strict-mcp-config`: **WITH** = CodeGraph's MCP server enabled, **WITHOUT** = an empty MCP config. Built-in Read/Grep/Bash stay available to both. Same question per repo, **4 runs per arm, median reported**. Cost = the run's `total_cost_usd`; Tokens = total tokens processed (input incl. cached + output); Time = wall-clock; Tool calls = every tool invocation, including those inside any sub-agents the model spawns. Repos cloned at `--depth 1` and indexed by the same CodeGraph build that served them. Re-validated 2026-06-02 on the current build. These numbers are lower than the prior Opus 4.7 validation — not a CodeGraph regression but a stronger native baseline: Opus 4.8 greps/reads efficiently on the main thread instead of fanning out into large Explore-subagent sweeps, so the no-CodeGraph arm is leaner than it used to be. Per-repo numbers move run-to-run with how hard the without-arm thrashes (the median-of-4 smooths it, but tails remain — e.g. Django's without-arm hit $2.71/14m one batch).
 
 **Queries:**
 | Codebase | Query |
@@ -190,7 +211,7 @@ CodeGraph cuts **tool calls and total tokens on every repo** and answers large r
 | Gin | "How does gin route requests through its middleware chain?" |
 | Alamofire | "How does Alamofire build, send, and validate a request?" |
 
-**Why CodeGraph wins:** with the index available, the agent answers directly — `codegraph_context` to map the area, then one `codegraph_explore` for the relevant source — and stops, usually with zero file reads. Without it, the agent spends most of its budget on discovery (find/ls/grep) before reading the right code. CodeGraph only helps when queried *directly*, so its instructions steer agents to answer directly rather than delegate exploration to file-reading sub-agents — otherwise a sub-agent reads files regardless and CodeGraph becomes overhead.
+**Why CodeGraph wins:** with the index available, the agent answers directly — usually one `codegraph_explore` returns the relevant source — and stops, usually with zero file reads. Without it, the agent spends most of its budget on discovery (find/ls/grep) before reading the right code. CodeGraph only helps when queried *directly*, so its instructions steer agents to answer directly rather than delegate exploration to file-reading sub-agents — otherwise a sub-agent reads files regardless and CodeGraph becomes overhead.
 
 </details>
 
@@ -365,7 +386,7 @@ npm install -g @colbymchenry/codegraph
   "permissions": {
     "allow": [
       "mcp__codegraph__codegraph_search",
-      "mcp__codegraph__codegraph_context",
+      "mcp__codegraph__codegraph_explore",
       "mcp__codegraph__codegraph_callers",
       "mcp__codegraph__codegraph_callees",
       "mcp__codegraph__codegraph_impact",
@@ -385,7 +406,7 @@ npm install -g @colbymchenry/codegraph
 CodeGraph's MCP server delivers its usage guidance to your agent **automatically**, in the MCP `initialize` response — there's no instructions file to manage and nothing is added to your `CLAUDE.md` / `AGENTS.md` / `GEMINI.md`. In short, it tells the agent to:
 
 - **Answer structural questions directly with CodeGraph** — it *is* the pre-built index, so a grep/read loop just repeats work it already did. Treat the returned source as already read.
-- **Pick the tool by intent:** `codegraph_context` to map an area, `codegraph_trace` for "how does X reach Y", `codegraph_explore` to survey several symbols, `codegraph_search` to find a symbol, `codegraph_callers`/`codegraph_callees` to walk call flow, `codegraph_impact` before editing, `codegraph_node` for one symbol's source.
+- **Pick the tool by intent:** `codegraph_explore` for almost anything — "how does X work", a flow/"how does X reach Y", or surveying an area (one call returns the relevant symbols' source grouped by file); `codegraph_search` to just locate a symbol; `codegraph_callers`/`codegraph_callees` to walk call flow; `codegraph_impact` before editing; `codegraph_node` for one specific symbol's full source (it returns every overload for an ambiguous name).
 - **Trust the results — don't re-verify with grep**, and check the staleness banner after edits.
 - If `.codegraph/` doesn't exist yet, offer to run `codegraph init -i`.
 
@@ -410,7 +431,7 @@ The exact text is `src/mcp/server-instructions.ts` — the single source of trut
 ┌───────────────────────────────────────────────────────────────────┐
 │                        CodeGraph MCP Server                       │
 │                                                                   │
-│       context · trace · explore · callers · callees · impact      │
+│       explore · search · callers · callees · impact · node        │
 │                                 │                                 │
 │                                 ▼                                 │
 │                       SQLite knowledge graph                      │
@@ -441,12 +462,12 @@ codegraph sync [path]             # Incremental update
 codegraph status [path]           # Show statistics
 codegraph query <search>          # Search symbols (--kind, --limit, --json)
 codegraph files [path]            # Show file structure (--format, --filter, --max-depth, --json)
-codegraph context <task>          # Build context for AI (--format, --max-nodes)
 codegraph callers <symbol>        # Find what calls a function/method (--limit, --json)
 codegraph callees <symbol>        # Find what a function/method calls (--limit, --json)
 codegraph impact <symbol>         # Analyze what code is affected by changing a symbol (--depth, --json)
 codegraph affected [files...]     # Find test files affected by changes (see below)
 codegraph serve --mcp             # Start MCP server
+codegraph upgrade [version]       # Update to the latest release (--check, --force)
 ```
 
 ### `codegraph affected`
@@ -485,14 +506,12 @@ When running as an MCP server, CodeGraph exposes these tools to Claude Code:
 
 | Tool | Purpose |
 |------|---------|
+| `codegraph_explore` | **Primary.** Answer almost any question in one call — "how does X work", a flow ("how does X reach Y"), or surveying an area — returning the relevant symbols' verbatim source grouped by file, plus a relationship map and blast radius. Surfaces dynamic-dispatch hops (callbacks, React re-render, interface→impl) grep can't follow. |
 | `codegraph_search` | Find symbols by name across the codebase |
-| `codegraph_context` | Build relevant code context for a task |
-| `codegraph_trace` | Trace the call path between two symbols ("how does X reach Y") in one call — each hop with its body inline, following dynamic-dispatch hops (callbacks, React re-render, interface→impl) that grep can't |
 | `codegraph_callers` | Find what calls a function |
 | `codegraph_callees` | Find what a function calls |
 | `codegraph_impact` | Analyze what code is affected by changing a symbol |
-| `codegraph_node` | Get details about a specific symbol (optionally with source code) |
-| `codegraph_explore` | Return source for several related symbols grouped by file, plus a relationship map, in one call |
+| `codegraph_node` | Get one specific symbol's details + full source (returns every overload for an ambiguous name) |
 | `codegraph_files` | Get indexed file structure (faster than filesystem scanning) |
 | `codegraph_status` | Check index health and statistics |
 
@@ -500,8 +519,14 @@ When running as an MCP server, CodeGraph exposes these tools to Claude Code:
 
 ## Library Usage
 
+CodeGraph can be embedded directly. The npm package re-exports its programmatic
+API, so both `import` and `require` resolve the `CodeGraph` class in your own
+process — handy for embedding it in an app (e.g. an Electron main process).
+
 ```typescript
 import CodeGraph from '@colbymchenry/codegraph';
+// CommonJS works too:
+//   const { CodeGraph } = require('@colbymchenry/codegraph');
 
 const cg = await CodeGraph.init('/path/to/project');
 // Or: const cg = await CodeGraph.open('/path/to/project');
@@ -519,6 +544,21 @@ cg.watch();   // auto-sync on file changes
 cg.unwatch(); // stop watching
 cg.close();
 ```
+
+Lower-level building blocks are exported from the same entry point for callers
+that drive the graph directly: `DatabaseConnection`, `QueryBuilder`,
+`getDatabasePath`, `initGrammars` / `loadGrammarsForLanguages`, and `FileLock`.
+
+**Embedding requirements**
+
+- Install from npm (`npm i @colbymchenry/codegraph`) so the matching
+  per-platform package — which carries the compiled library and its
+  dependencies — is fetched alongside the shim.
+- The API runs on **your** runtime, so it needs **Node 22.5+** for the built-in
+  `node:sqlite` (Electron qualifies when its bundled Node is 22.5+). The CLI and
+  MCP server are unaffected — they run on the self-contained bundled runtime.
+- TypeScript types ship with the package. As with any Node-targeting library,
+  keep `@types/node` available and `skipLibCheck: true` (the common default).
 
 ---
 
@@ -598,6 +638,36 @@ is written):
 | Pascal / Delphi | `.pas`, `.dpr`, `.dpk`, `.lpr` | Full support (classes, records, interfaces, enums, DFM/FMX form files) |
 | Lua | `.lua` | Full support (functions, methods with receivers, local variables, `require` imports, call edges) |
 | Luau | `.luau` | Full support (everything in Lua, plus `type`/`export type` aliases, typed signatures, and Roblox instance-path `require`) |
+
+## Measured cross-file coverage
+
+Impact and blast-radius queries are only as good as the dependency graph behind them, so coverage is measured rather than asserted. **Fair coverage** = the share of symbol-bearing source files that have at least one *resolved cross-file dependent* — something that imports, calls, references, or (through a framework convention) routes to them — on a real-world benchmark repo per language. The residual is always a genuine static-analysis frontier (runtime dynamic dispatch, reflection / DI containers, framework-convention entry points, vendored third-party code), never hidden by gaming the denominator.
+
+| Language | Benchmark repo | Coverage |
+|---|---|---|
+| TypeScript / JavaScript | this repo | 95.8% |
+| Python | psf/requests | 100% |
+| Go | gin-gonic/gin | 96.6% |
+| Rust | BurntSushi/ripgrep | 86.7% |
+| Java | google/gson | 93.3% |
+| C# | jbogard/MediatR | 85.2% |
+| PHP | guzzle/guzzle | 100% |
+| Ruby | sidekiq/sidekiq | 100% |
+| C | redis/redis | 92.2% |
+| C++ | google/leveldb | 94.8% |
+| Objective-C | SDWebImage | 91.6% |
+| Swift | Alamofire | 95.3% |
+| Kotlin | square/okhttp | 96.2% |
+| Scala | gatling/gatling | 91.2% |
+| Dart | flutter/packages | 92.4% |
+| Svelte / SvelteKit | sveltejs/realworld | 100% |
+| Vue / Nuxt | nuxt/movies | 93.5% |
+| Lua | nvim-telescope/telescope.nvim | 84.2% |
+| Luau | dphfox/Fusion | 92.2% |
+| Liquid | Shopify/dawn | 73.8% |
+| Pascal / Delphi | PascalCoin | 75.7% |
+
+Framework routing is validated the same way, on a canonical app per framework: Express 100%, FastAPI 98%, Flask 100%, NestJS 96.8%, Gin 96.5%, Axum 100%, Rocket 93.8%, Vapor 100%, Laravel 92%, Rails 89.6%, React Router 100% — and the convention/reflection-heavy ones at their honest static-analysis ceiling: ASP.NET 83.9%, Spring 83.3%, Drupal 78.9%, Django 74.1%.
 
 ## Troubleshooting
 
